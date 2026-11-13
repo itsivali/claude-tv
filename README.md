@@ -40,7 +40,19 @@ Claude TV combines a native Java launcher with Python ADB tools and editable, mo
 | Optional screensaver | A drifting clock and slowly changing ambient glow using Android's dream service. |
 | Local tooling | Shell, batch operations, file transfers and package disable/restore scripts for Bash and PowerShell. |
 
-### A closer look
+### The current look
+
+Captured on a Xiaomi TV Stick (MiTV-AESP0, Android TV 10). The background takes the colour of whichever app has focus.
+
+| Dock · Netflix focused | Dock · Prime Video focused |
+|:---:|:---:|
+| ![Dock with Netflix focused and a red background](docs/restyle-dock-netflix.png) | ![Dock with Prime Video focused and a blue background](docs/restyle-dock-prime.png) |
+
+| Dock · moving along the row | App grid |
+|:---:|:---:|
+| ![Dock with the second tile focused](docs/restyle-dock-netfly.png) | ![App grid with a tile focused and an orange background](docs/restyle-grid.png) |
+
+### A closer look at the original
 
 | Before · stock home | After · the retained launcher interface |
 |:---:|:---:|
@@ -61,7 +73,7 @@ Claude TV combines a native Java launcher with Python ADB tools and editable, mo
 
 </details>
 
-These are the original project's included screenshots. They show the layout, which is unchanged; the focus highlight, dock band and background colour have since been restyled, so the current build looks somewhat different. They are not newly captured device tests. App availability and input labels vary by TV.
+The screenshots in this section and at the top of the page are the original project's. They show the layout, which is unchanged; the focus highlight, dock band and background colour have since been restyled, as shown under [The current look](#the-current-look). App availability and input labels vary by TV.
 
 ## Contents
 
