@@ -32,7 +32,7 @@ Claude TV combines a native Java launcher with Python ADB tools and editable, mo
 | Feature | What you get |
 |---|---|
 | Favourite apps first | A configurable dock with four slots by default; other TV apps follow alphabetically. |
-| A focused interface | Black background, app-coloured ambient glow, banner artwork and an animated glass-style focus highlight. |
+| A focused interface | A background that takes the focused app's colour and cross-fades between apps, banner artwork, a frosted dock, and a focus highlight of light (rim, coloured halo, sheen) that glides between tiles on springs. |
 | Remote-first navigation | Row-by-row D-pad movement, a grid revealed with Down, and focus restored on return from an app while the process survives. |
 | Everyday controls | Inputs, Wi-Fi status and system Settings; long-press an app tile for its Android app settings. |
 | TV inputs | HDMI and other passthrough inputs exposed by the device, plus a configurable Live TV app. Availability depends on firmware. |
@@ -61,7 +61,7 @@ Claude TV combines a native Java launcher with Python ADB tools and editable, mo
 
 </details>
 
-These are the original project's included screenshots, illustrating the interface preserved by Claude TV. They are not newly captured device tests. App availability and input labels vary by TV.
+These are the original project's included screenshots. They show the layout, which is unchanged; the focus highlight, dock band and background colour have since been restyled, so the current build looks somewhat different. They are not newly captured device tests. App availability and input labels vary by TV.
 
 ## Contents
 
@@ -87,6 +87,7 @@ The included community examples record these devices; they are starting points, 
 |---|---|---|
 | Xiaomi Mi TV 4A · MiTV-MOOQ1 | Android TV 10 | [View](examples/xiaomi-mi-tv-4a/debloat.txt) |
 | Xiaomi MiTV-AXSO0 · dangal | Android TV 9 | [View](examples/xiaomi-mitv-axso0/debloat.txt) |
+| Xiaomi TV Stick · MiTV-AESP0 · aquaman | Android TV 10 | [View](examples/xiaomi-tv-stick-aesp0/debloat.txt) |
 | TCL 55-inch G10 · 2023 | Google TV / Android 12 | [View](examples/tcl-g10-google-tv/debloat.txt) |
 | SANYO ATV R2 | Android TV 9 | [View](examples/sanyo-atv-r2/debloat.txt) |
 | OnePlus TV D00 · Dubai | Google TV / Android 14 | [View](examples/oneplus-tv-dubai/debloat.txt) |
@@ -342,7 +343,7 @@ Claude-TV/
 |-- CONTRIBUTING.md            Contribution and validation guide
 |-- LICENSE                    Original MIT notice and font attribution
 |-- docs/                      Original screenshots and comparisons
-|-- examples/                  Five model-specific package lists
+|-- examples/                  Six model-specific package lists
 |-- tools/
 |   |-- tv.py                  ADB TCP shell, batch, push and pull
 |   |-- b64push.py             Base64 upload with MD5 comparison
@@ -395,6 +396,8 @@ Use simple remote paths without spaces or shell metacharacters: the upload helpe
 | Gradle cannot resolve dependencies | First builds need repository access. Offline builds need a cached distribution and dependencies. |
 | APK signature mismatch | The installed app must use the same signing key. Keeping the package ID means a differently signed build cannot update it in place. |
 | Home opens stock or a factory app | Verify successful installation and repeat the HOME selection command in [Install and select Home](#4-install-and-select-home). Do not disable stock HOME before verifying. |
+| HOME selection reports Success but Home still opens stock | Seen on the Xiaomi TV Stick (MiTV-AESP0): the stock launcher wins until it is disabled. Verify Claude TV first by starting it directly with `tools/tv.py 'am start -n com.gathin.tvhome/.MainActivity'`, then disable stock HOME. |
+| `./gradlew` fails with different SDK paths | Your shell sets both `ANDROID_HOME` and `ANDROID_SDK_ROOT` to different locations. Unset `ANDROID_SDK_ROOT` for the build. |
 | Windows restore cannot select HOME | Use the full recorded component as described in [restoration](#debloating-and-restoration). |
 | Wi-Fi name missing | Check location permission and device location settings; the UI falls back to connection status. |
 | Missing app tile | Check `hidden_apps`, enabled state and whether the app exposes a Leanback launcher activity. |

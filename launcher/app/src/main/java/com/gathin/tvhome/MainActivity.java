@@ -25,8 +25,7 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.animation.AnimationUtils;
-import android.view.animation.LayoutAnimationController;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -47,7 +46,8 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * tvOS style home: black, a pinned dock row, an app grid, and one glass highlight that springs between tiles.
+ * tvOS style home: a pinned dock row, an app grid, an ambient glow in the focused app's colour, and one
+ * highlight that glides between tiles.
  */
 public class MainActivity extends Activity implements AppAdapter.TileListener {
 
@@ -60,11 +60,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private RecyclerView grid;
     private FrameLayout root;
     private GlassView glass;
-    private View ambient;
-    private TextView heroName;
-    private GradientDrawable ambientGlow;
+    /** Ambient layers are rendered at 1/AMBIENT_DOWNSCALE of the screen and stretched (see activity_main.xml). */
+    private static final int AMBIENT_DOWNSCALE = 4;
+    private final View[] ambients = new View[2];
+    private final GradientDrawable[] ambientGlows = new GradientDrawable[2];
+    private int ambientTop;
     private int ambientColor;
+    private boolean ambientOn;
+    private TextView heroName;
     private boolean heroShown;
+    private final DecelerateInterpolator ease = new DecelerateInterpolator(1.8f);
     private TextView greeting;
     private TextView btnWifi;
     private SpringAnimation springX, springY;
@@ -109,14 +114,29 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
         root = findViewById(R.id.root);
         glass = findViewById(R.id.glass);
-        ambient = findViewById(R.id.ambient);
         heroName = findViewById(R.id.heroName);
-        ambientGlow = new GradientDrawable();
-        ambientGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
-        ambientGlow.setGradientCenter(0.32f, 0.42f);
-        ambient.setBackground(ambientGlow);
-        ambient.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
-                ambientGlow.setGradientRadius((r - l) * 0.62f));
+        ambients[0] = findViewById(R.id.ambientA);
+        ambients[1] = findViewById(R.id.ambientB);
+        int ambientW = getResources().getDisplayMetrics().widthPixels / AMBIENT_DOWNSCALE + 1;
+        int ambientH = getResources().getDisplayMetrics().heightPixels / AMBIENT_DOWNSCALE + 1;
+        for (int i = 0; i < 2; i++) {
+            GradientDrawable glow = new GradientDrawable();
+            glow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+            glow.setGradientCenter(0.34f, 0.36f);
+            glow.setGradientRadius(ambientW * 0.95f);
+            ambientGlows[i] = glow;
+            View a = ambients[i];
+            a.setBackground(glow);
+            ViewGroup.LayoutParams alp = a.getLayoutParams();
+            alp.width = ambientW;
+            alp.height = ambientH;
+            a.setLayoutParams(alp);
+            a.setPivotX(0f);
+            a.setPivotY(0f);
+            a.setScaleX(AMBIENT_DOWNSCALE);
+            a.setScaleY(AMBIENT_DOWNSCALE);
+            a.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        }
         greeting = findViewById(R.id.greeting);
         btnWifi = findViewById(R.id.btnWifi);
 
@@ -125,15 +145,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.setHasFixedSize(true);
         grid.setItemAnimator(null);
         grid.addItemDecoration(new DockDecoration(COLUMNS, density));
-        grid.setLayoutAnimation(new LayoutAnimationController(
-                AnimationUtils.loadAnimation(this, R.anim.tile_enter), 0.06f));
         adapter = new AppAdapter(this, this, COLUMNS);
         grid.setAdapter(adapter);
 
         // tvOS layout: push the dock row to the bottom of the screen; the grid hides below until you press Down.
         grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             int h = b - t;
-            int dockRow = (int) ((145 + 6 + 12) * density);   // item height plus DockDecoration offsets
+            int dockRow = (int) ((153 + 6 + 12) * density);   // item height plus DockDecoration offsets
             int want = Math.max(0, h - dockRow - (int) (30 * density));
             if (grid.getPaddingTop() != want) {
                 grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), grid.getPaddingBottom());
@@ -151,11 +169,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         });
 
-        // Liquid feel: soft springs on the highlight's position.
+        // The highlight glides to the next tile and settles without wobble.
         springX = new SpringAnimation(glass, DynamicAnimation.TRANSLATION_X);
         springY = new SpringAnimation(glass, DynamicAnimation.TRANSLATION_Y);
         for (SpringAnimation s : new SpringAnimation[]{springX, springY}) {
-            s.setSpring(new SpringForce().setStiffness(260f).setDampingRatio(0.58f));
+            s.setSpring(new SpringForce().setStiffness(380f).setDampingRatio(0.86f));
         }
 
         View btnInputs = findViewById(R.id.btnInputs);
@@ -193,12 +211,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         glass.setAlpha(0f);
         heroShown = false;
         heroName.setAlpha(0f);
-        ambient.setAlpha(0f);
         // Read these before reload(): rebinding can move focus to the first tile and overwrite them.
         final String returnKey = lastFocusedKey;
         final int returnSlot = lastFocused;
         adapter.reload();
-        grid.scheduleLayoutAnimation();
+        // Home fades up as one piece. A single cached layer costs far less than animating every tile.
+        grid.animate().cancel();
+        grid.setAlpha(0f);
+        grid.animate().alpha(1f).setDuration(340).setInterpolator(ease).withLayer().start();
         updateGreeting();
         updateWifiLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
@@ -238,7 +258,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // Tile rect in root coordinates, using layout positions (ignores the scale animation).
         Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
         root.offsetDescendantRectToMyCoords(card, r);
-        float pad = 6f * density;        // matches GlassView's glow inset
+        float pad = GlassView.INSET_DP * density;
         float w = card.getWidth() * AppAdapter.FOCUS_SCALE + 2 * pad;
         float h = card.getHeight() * AppAdapter.FOCUS_SCALE + 2 * pad;
         float x = r.exactCenterX() - w / 2f;
@@ -249,16 +269,21 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             lp.width = (int) w;
             lp.height = (int) h;
             glass.setLayoutParams(lp);
-            glass.setRadius(16f * density * AppAdapter.FOCUS_SCALE + pad);
+            glass.setRadius(AppAdapter.RADIUS_DP * density * AppAdapter.FOCUS_SCALE);
         }
         glassTargetX = x;
         glassTargetY = y;
+        int color = adapter.ambientColorAt(position);
+        glass.setTint(color);
+        glass.playSheen();
+        // The whole background takes the focused app's colour: full strength on the dock, a little quieter in the grid.
+        showAmbient(color, position < COLUMNS ? 1f : 0.8f);
         if (!glassShown) {
             springX.cancel();
             springY.cancel();
             glass.setTranslationX(x);
             glass.setTranslationY(y);
-            glass.animate().alpha(1f).setDuration(180).start();
+            glass.animate().alpha(1f).setDuration(220).setInterpolator(ease).start();
             glassShown = true;
         } else {
             springX.animateToFinalPosition(x);
@@ -269,12 +294,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             // Dock: park it at the bottom of the screen and show the top shelf for this app.
             int decoratedTop = item.getTop() - (int) (6 * density);
             int dy = decoratedTop - grid.getPaddingTop();
-            if (Math.abs(dy) > 1) grid.smoothScrollBy(0, dy);
+            if (Math.abs(dy) > 1) grid.smoothScrollBy(0, dy, ease, 420);
             showHero(position, r.top - dy);
         } else {
             hideHero();
             // Scroll just enough so the whole glass (not only the tile) is visible.
-            Rect want = new Rect(0, -(int) pad * 2, item.getWidth(), item.getHeight() + (int) pad);
+            Rect want = new Rect(0, -(int) pad, item.getWidth(), item.getHeight() + (int) pad);
             grid.requestChildRectangleOnScreen(item, want, false);
         }
     }
@@ -283,7 +308,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void showHero(int position, float dockTopInRoot) {
         String label = adapter.labelAt(position);
-        int color = adapter.ambientColorAt(position);
         float y = dockTopInRoot - 14 * density - 26 * density - heroName.getHeight();
         boolean changed = !label.contentEquals(heroName.getText());
 
@@ -291,39 +315,41 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             heroName.setText(label);
             heroName.setY(y);
             heroName.setTranslationX(0f);
-            heroName.animate().alpha(1f).setDuration(260).start();
-            setAmbient(color);
-            ambient.animate().alpha(1f).setDuration(600).start();
+            heroName.animate().alpha(1f).setDuration(320).setInterpolator(ease).start();
             heroShown = true;
         } else if (changed) {
             heroName.animate().alpha(0f).translationX(-12 * density).setDuration(120).withEndAction(() -> {
                 heroName.setText(label);
                 heroName.setY(y);
                 heroName.setTranslationX(12 * density);
-                heroName.animate().alpha(1f).translationX(0f).setDuration(200).start();
+                heroName.animate().alpha(1f).translationX(0f).setDuration(260).setInterpolator(ease).start();
             }).start();
-            if (color != ambientColor) {
-                ambient.animate().alpha(0.35f).setDuration(200).withEndAction(() -> {
-                    setAmbient(color);
-                    ambient.animate().alpha(1f).setDuration(500).start();
-                }).start();
-            }
         } else {
             heroName.setY(y);
         }
     }
 
-    private void setAmbient(int color) {
-        ambientColor = color;
+    /** Cross-fades the ambient glow to a colour: the new colour rises on one layer while the old one sinks on the other. */
+    private void showAmbient(int color, float level) {
+        if (ambientOn && color == ambientColor) {
+            ambients[ambientTop].animate().alpha(level).setDuration(500).start();
+            return;
+        }
+        int next = ambientOn ? ambientTop ^ 1 : ambientTop;
         int c = color & 0x00FFFFFF;
-        ambientGlow.setColors(new int[]{0x5C000000 | c, 0x26000000 | c, 0x00000000 | c});
+        // Brightest behind the hero title, but never fading out completely: the whole screen takes the colour.
+        ambientGlows[next].setColors(new int[]{0x8C000000 | c, 0x52000000 | c, 0x1F000000 | c});
+        if (next != ambientTop) ambients[ambientTop].animate().alpha(0f).setDuration(700).start();
+        ambients[next].animate().alpha(level).setDuration(700).start();
+        ambientTop = next;
+        ambientColor = color;
+        ambientOn = true;
     }
 
     private void hideHero() {
         if (!heroShown) return;
         heroShown = false;
         heroName.animate().alpha(0f).setDuration(160).start();
-        ambient.animate().alpha(0f).setDuration(300).start();
     }
 
     private void hideGlass() {

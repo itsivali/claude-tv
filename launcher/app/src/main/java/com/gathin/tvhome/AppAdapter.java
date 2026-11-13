@@ -1,5 +1,6 @@
 package com.gathin.tvhome;
 
+import android.app.ActivityOptions;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
@@ -12,6 +13,7 @@ import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.provider.Settings;
 import android.view.KeyEvent;
@@ -19,19 +21,24 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
-import android.view.animation.OvershootInterpolator;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.dynamicanimation.animation.DynamicAnimation;
+import androidx.dynamicanimation.animation.SpringAnimation;
+import androidx.dynamicanimation.animation.SpringForce;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -53,18 +60,32 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         final String pkg;
         final Drawable banner;
         final Drawable icon;
+        /** Component plus APK path: stable while the app is unchanged, new after an update. */
+        final String cacheKey;
+        final String key;
         int ambient;
+        Drawable tileBg;
 
-        Entry(String label, ComponentName component, Drawable banner, Drawable icon) {
+        Entry(String label, ComponentName component, Drawable banner, Drawable icon, String cacheKey) {
             this.label = label;
             this.component = component;
             this.pkg = component.getPackageName();
             this.banner = banner;
             this.icon = icon;
+            this.cacheKey = cacheKey;
+            this.key = component.flattenToShortString();
         }
     }
 
-    static final float FOCUS_SCALE = 1.10f;
+    static final float FOCUS_SCALE = 1.09f;
+    /** Tile corner radius. */
+    static final float RADIUS_DP = 18f;
+
+    /**
+     * Loaded artwork, kept for the life of the process. Home is resumed every time an app closes;
+     * decoding every banner again on the main thread each time is what makes that return stutter.
+     */
+    private static final Map<String, Entry> CACHE = new HashMap<>();
 
     private final Context ctx;
     private final TileListener listener;
@@ -95,11 +116,21 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             if (ri.activityInfo == null) continue;
             String pkg = ri.activityInfo.packageName;
             if (pkg.equals(ctx.getPackageName()) || hidden.contains(pkg)) continue;
-            Drawable banner = ri.activityInfo.loadBanner(pm);
-            if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
-            Drawable icon = ri.loadIcon(pm);
-            String label = String.valueOf(ri.loadLabel(pm));
-            fresh.add(new Entry(label, new ComponentName(pkg, ri.activityInfo.name), banner, icon));
+            ComponentName component = new ComponentName(pkg, ri.activityInfo.name);
+            String cacheKey = component.flattenToShortString() + '|' + ri.activityInfo.applicationInfo.sourceDir;
+            Entry e = CACHE.get(cacheKey);
+            if (e == null) {
+                Drawable banner = ri.activityInfo.loadBanner(pm);
+                if (banner == null) banner = ri.activityInfo.applicationInfo.loadBanner(pm);
+                Drawable icon = banner == null ? ri.loadIcon(pm) : null;
+                e = new Entry(String.valueOf(ri.loadLabel(pm)), component, banner, icon, cacheKey);
+                // Sample the colour and build the tile background now, once, so that moving focus
+                // onto a tile never has to do this work in the middle of an animation.
+                e.ambient = vividColor(banner != null ? banner : icon);
+                if (banner == null) e.tileBg = tileBackground(e.ambient);
+                CACHE.put(cacheKey, e);
+            }
+            fresh.add(e);
         }
         Collections.sort(fresh, (a, b) -> {
             int fa = favourites.indexOf(a.pkg), fb = favourites.indexOf(b.pkg);
@@ -110,6 +141,11 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             }
             return a.label.compareToIgnoreCase(b.label);
         });
+        Set<String> live = new HashSet<>();
+        for (Entry e : fresh) live.add(e.cacheKey);
+        CACHE.keySet().retainAll(live);
+        // Nothing installed, removed or updated: leave the tiles alone rather than rebinding them all.
+        if (fresh.equals(items)) return;
         items.clear();
         items.addAll(fresh);
         notifyDataSetChanged();
@@ -129,9 +165,12 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         h.name.setVisibility(position < dockSize ? View.INVISIBLE : View.VISIBLE);   // the dock has no labels
         boolean focused = h.card.isFocused();   // a rebind after reload() can hit the focused tile
         h.name.setAlpha(focused ? 1f : 0f);
+        h.scaleX.cancel();
+        h.scaleY.cancel();
         h.card.setScaleX(focused ? FOCUS_SCALE : 1f);
         h.card.setScaleY(focused ? FOCUS_SCALE : 1f);
         if (e.banner != null) {
+            h.card.setBackgroundResource(R.drawable.tile_bg);
             h.banner.setImageDrawable(e.banner);
             h.banner.setVisibility(View.VISIBLE);
             h.icon.setVisibility(View.GONE);
@@ -139,12 +178,15 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         } else {
             h.banner.setImageDrawable(null);
             h.banner.setVisibility(View.GONE);
+            // No banner artwork: give the tile a wash of the icon's own colour instead of flat grey.
+            if (e.tileBg == null) e.tileBg = tileBackground(ambientColorAt(position));
+            h.card.setBackground(e.tileBg);
             h.icon.setImageDrawable(e.icon);
             h.icon.setVisibility(View.VISIBLE);
             h.label.setText(e.label);
             h.label.setVisibility(View.VISIBLE);
         }
-        h.card.setOnClickListener(v -> launch(e));
+        h.card.setOnClickListener(v -> launch(e, v));
         h.card.setOnLongClickListener(v -> {
             Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + e.pkg));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -156,13 +198,26 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         });
     }
 
-    private void launch(Entry e) {
+    private static Drawable tileBackground(int color) {
+        float[] hsv = new float[3];
+        Color.colorToHSV(color, hsv);
+        hsv[1] = Math.min(hsv[1], 0.72f);
+        hsv[2] = 0.46f;
+        int top = Color.HSVToColor(hsv);
+        hsv[2] = 0.20f;
+        int bottom = Color.HSVToColor(hsv);
+        return new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{top, bottom});
+    }
+
+    private void launch(Entry e, View card) {
         Intent i = new Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
                 .setComponent(e.component)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         try {
-            ctx.startActivity(i);
+            // The app opens out of its own tile.
+            ctx.startActivity(i, ActivityOptions.makeClipRevealAnimation(
+                    card, 0, 0, card.getWidth(), card.getHeight()).toBundle());
         } catch (Exception ex) {
             Toast.makeText(ctx, ctx.getString(R.string.cant_open, e.label), Toast.LENGTH_SHORT).show();
         }
@@ -175,19 +230,19 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
 
     @Override
     public long getItemId(int position) {
-        return items.get(position).component.flattenToShortString().hashCode();
+        return items.get(position).key.hashCode();
     }
 
     /** Stable key for the app at a position (its component), or null. */
     String keyAt(int position) {
-        return position >= 0 && position < items.size() ? items.get(position).component.flattenToShortString() : null;
+        return position >= 0 && position < items.size() ? items.get(position).key : null;
     }
 
     /** Position of the app with this key, or -1 when it is gone. */
     int positionOf(String key) {
         if (key == null) return -1;
         for (int i = 0; i < items.size(); i++) {
-            if (items.get(i).component.flattenToShortString().equals(key)) return i;
+            if (items.get(i).key.equals(key)) return i;
         }
         return -1;
     }
@@ -252,6 +307,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
         final ImageView icon;
         final TextView label;
         final TextView name;
+        final SpringAnimation scaleX, scaleY;
 
         Holder(View v, TileListener listener) {
             super(v);
@@ -262,7 +318,7 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
             name = v.findViewById(R.id.name);
 
             final float density = v.getResources().getDisplayMetrics().density;
-            final float radius = density * 16f;
+            final float radius = density * RADIUS_DP;
             card.setOutlineProvider(new ViewOutlineProvider() {
                 @Override
                 public void getOutline(View view, Outline outline) {
@@ -270,6 +326,16 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
                 }
             });
             card.setClipToOutline(true);
+
+            // Springs rather than fixed-length tweens: when focus moves again mid-animation the tile
+            // carries its velocity into the new target instead of restarting, which is what keeps fast
+            // D-pad presses looking fluid. Damped enough to settle with barely any overshoot.
+            scaleX = new SpringAnimation(card, DynamicAnimation.SCALE_X);
+            scaleY = new SpringAnimation(card, DynamicAnimation.SCALE_Y);
+            for (SpringAnimation s : new SpringAnimation[]{scaleX, scaleY}) {
+                s.setSpring(new SpringForce().setStiffness(420f).setDampingRatio(0.78f));
+            }
+            final DecelerateInterpolator ease = new DecelerateInterpolator(1.8f);
 
             card.setOnKeyListener((view, keyCode, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
@@ -280,13 +346,11 @@ public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
 
             card.setOnFocusChangeListener((view, focused) -> {
                 float s = focused ? FOCUS_SCALE : 1.0f;
-                view.animate().scaleX(s).scaleY(s)
-                        .setDuration(focused ? 260 : 180)
-                        .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
-                        .start();
+                scaleX.animateToFinalPosition(s);
+                scaleY.animateToFinalPosition(s);
                 name.animate().alpha(focused ? 1f : 0f)
-                        .translationY(focused ? density * 4f : -density * 6f)
-                        .setDuration(220).start();
+                        .translationY(focused ? density * 5f : -density * 4f)
+                        .setDuration(focused ? 260 : 140).setInterpolator(ease).start();
                 int pos = getBindingAdapterPosition();
                 if (focused && listener != null && pos != RecyclerView.NO_POSITION) {
                     listener.onTileFocused(pos, view);

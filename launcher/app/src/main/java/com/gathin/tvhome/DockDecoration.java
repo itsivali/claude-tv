@@ -1,15 +1,17 @@
 package com.gathin.tvhome;
 
 import android.graphics.Canvas;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.view.View;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
-/** Draws the tvOS style lighter band behind the first (dock) row and adds a gap below it. */
+/** Draws the tvOS style frosted band behind the first (dock) row and adds a gap below it. */
 public class DockDecoration extends RecyclerView.ItemDecoration {
 
     private final int dockSize;
@@ -17,14 +19,13 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
     private final Paint band = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
+    private float shaderHeight = -1f;
 
     DockDecoration(int dockSize, float density) {
         this.dockSize = dockSize;
         this.density = density;
-        band.setColor(0xFF141416);
         edge.setStyle(Paint.Style.STROKE);
         edge.setStrokeWidth(density);
-        edge.setColor(0x1FFFFFFF);
     }
 
     @Override
@@ -60,8 +61,20 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
         if (!any) return;
         float pad = 14 * density;
         rect.inset(-pad, -pad);
-        float radius = 26 * density;
+        // Translucent white over the ambient glow, so the band picks up the focused app's colour.
+        // Drawn in the band's own coordinates so the shaders are built once, not on every scroll frame.
+        float h = rect.height();
+        if (h != shaderHeight) {
+            shaderHeight = h;
+            band.setShader(new LinearGradient(0, 0, 0, h, 0x24FFFFFF, 0x0DFFFFFF, Shader.TileMode.CLAMP));
+            edge.setShader(new LinearGradient(0, 0, 0, h, 0x47FFFFFF, 0x0FFFFFFF, Shader.TileMode.CLAMP));
+        }
+        float radius = 30 * density;
+        c.save();
+        c.translate(rect.left, rect.top);
+        rect.offsetTo(0, 0);
         c.drawRoundRect(rect, radius, radius, band);
         c.drawRoundRect(rect, radius, radius, edge);
+        c.restore();
     }
 }

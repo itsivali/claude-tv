@@ -1,0 +1,37 @@
+# Xiaomi TV Stick (MiTV-AESP0, codename aquaman), Android TV 10, firmware QT.2514, 1280x720 UI
+# A conservative list: casting, voice search and firmware updates are left on.
+#
+# Apply:   TV_HOST=<tv ip> tools/disable.sh examples/xiaomi-tv-stick-aesp0/debloat.txt
+# Undo:    TV_HOST=<tv ip> tools/restore.sh examples/xiaomi-tv-stick-aesp0/debloat.txt
+# Everything is DISABLED, not uninstalled. Comment out any line you want to keep.
+#
+# Known quirk on this firmware: `cmd package set-home-activity` reports Success but the Home button
+# keeps opening the stock launcher until com.google.android.tvlauncher is disabled. To try the new
+# launcher before that, start it directly: am start -n com.gathin.tvhome/.MainActivity
+
+# Xiaomi telemetry
+com.miui.tv.analytics
+com.xiaomi.statistic
+
+# PatchWall and Mi content rows / promos
+com.mitv.tvhome.atv
+com.mitv.tvhome.michannel
+com.mitv.tvhome.mitvplus
+com.xm.webcontent
+
+# Preloaded Google extras
+com.google.android.play.games
+com.google.android.feedback
+com.google.android.tv.bugreportsender
+com.google.android.music               # defunct Play Music; YouTube Music is a separate package
+
+# Stock launcher and its recommendation service, replaced by launcher/
+com.google.android.tvlauncher
+com.google.android.tvrecommendations
+
+# Kept on purpose. Uncomment to disable.
+# com.xiaomi.mitv.updateservice        # firmware updates
+# com.xiaomi.wfdsinkhelperservice      # Miracast
+# com.google.android.apps.mediashell   # Chromecast built-in
+# com.google.android.katniss           # Google Assistant / voice search
+# com.google.android.backdrop          # stock screensaver
